@@ -2,73 +2,82 @@
 
 int main(int argc, char **argv) {
 
-    check_opt(argc, argv);
+    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &initThread);
 
-    srand(time(NULL));
-
-    MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &provided);
-    int ok = 5;
-    MPI_Comm_rank(MPI_COMM_WORLD, &ok);
-    MPI_Comm_rank(MPI_COMM_WORLD, &node_id);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
+    MPI_Comm_rank(MPI_COMM_WORLD, &processId);
 
-    rc = pthread_create(&recv_msg_thread, NULL, recv_msg, NULL);
-    if (rc) {
-        print_debug_message("unable to create thread");
+    msgReceiver = pthread_create(&receiveMessageThread, NULL, receiveMsg, NULL);
+    if (msgReceiver) {
+        printMessage("unable to create thread", 0, false);
         MPI_Finalize();
     }
 
-    receiver = (node_id + 1) % size;
-    cout << "size is " << size << " current is " << ok << endl;
+    keyListener = pthread_create(&listenerThread, NULL, listenKey, NULL);
+    if (keyListener) {
+        printMessage("unable to create thread", 0, false);
+        MPI_Finalize();
+    }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
-    if (node_id == 0) {
-        send_ping(ping, false);
-        send_pong(pong, false);
+    // first process has token
+    if (processId == 0) {
+        sendPing(ping, false);
+        sendPong(pong, false);
     }
 
     while (true) {
-        if (critical_section) {
-            print_debug_message("entered critical section");
-            usleep(CRITICAL_SECTION_SLEEP_TIME);
-            print_debug_message("left critical section");
-            data_mutex.lock();
-            critical_section = false;
+        if (criticalSection) {
+            printMessage("in critical section", 0, false);
+            usleep(1000000); // performing complex computations
+            printMessage("out of critical section", 0, false);
+            dataMutex.lock(); //lock and release
+            criticalSection = false;
 
-            if (ping_flag && !pong_flag && (rand() % 100 > 100 - PING_LOSS_CHANCE)) {
-                print_debug_message("PING lost", ping);
+            if (pingPressed) {
+                printMessage("PING lost", ping, true);
             } else {
-                send_ping(ping, true);
+                sendPing(ping, true);
             }
 
-            data_mutex.unlock();
+            dataMutex.unlock();
         } else {
-            cond_var.wait(lk);
+            conditionVariable.wait(uniqueLock);
         }
     }
-
-    MPI_Finalize();
 }
 
-void regenerate(int val) {
-    ping = abs(val);
+void regenerate(int value) {
+    ping = abs(value);
     pong = -ping;
 }
 
-void incarnate(int val) {
-    ping = abs(val) + 1;
+void incarnate(int value) {
+    ping = abs(value) + 1;
     pong = -ping;
 }
 
-void print_debug_message(const char *message, int value) {
-    if (value == INT_MIN)
-        cout << "Node [" << node_id << "]: " << message << endl;
-    else
-        cout << "Node [" << node_id << "]: " << message << " [" << value << "]" << endl;
+void sendPong(int pong, bool saveState) {
+    usleep(500000);
+    printMessage("PONG sent", pong, true);
+
+    if (saveState)
+        m = pong;
+
+    MPI_Send(&pong, MSG_SIZE, MPI_INT, receiver, MSG_PONG, MPI_COMM_WORLD);
 }
 
-void *recv_msg(void *arg) {
+void sendPing(int ping, bool saveState) {
+    printMessage("PING sent", ping, true);
+
+    if (saveState)
+        m = ping;
+
+    MPI_Send(&ping, MSG_SIZE, MPI_INT, receiver, MSG_PING, MPI_COMM_WORLD);
+}
+
+void *receiveMsg(void *arg) {
     int msg;
     MPI_Status status;
 
@@ -77,97 +86,79 @@ void *recv_msg(void *arg) {
 
         if (status.MPI_TAG == MSG_PING) {
             if (msg < abs(m)) {
-                print_debug_message("OLD PING has arrived (delete action)", msg);
+                printMessage("Old PING received", msg, true);
             } else {
-                print_debug_message("PING received", msg);
+                printMessage("PING received", msg, true);
 
-                data_mutex.lock();
+                dataMutex.lock();
 
-                if (m == msg) {
+                if (m == msg) { // the same ping means that pong is lost
                     regenerate(msg);
-                    print_debug_message("REGENERATE PONG", pong);
-                    send_pong(pong, false);
+                    printMessage("REGENERATE PONG", pong, true);
+                    sendPong(pong, false);
                 } else {
                     if (m < msg)
                         regenerate(msg);
 
-                    critical_section = true;
+                    criticalSection = true;
                 }
 
-                data_mutex.unlock();
-                cond_var.notify_one();
+                dataMutex.unlock();
+                conditionVariable.notify_one();
             }
         } else if (status.MPI_TAG == MSG_PONG) {
             if (abs(msg) < abs(m)) {
-                print_debug_message("OLD PONG has arrived (delete action)", msg);
+                printMessage("OLD PONG has arrived (delete action)", msg, true);
             } else {
-                print_debug_message("PONG received", msg);
+                printMessage("PONG received", msg, true);
                 bool inc = false;
 
-                data_mutex.lock();
+                dataMutex.lock();
 
-                if (critical_section) {
+                if (criticalSection) {
                     incarnate(msg);
                     inc = true;
                 } else if (m == msg) {
                     regenerate(msg);
-                    print_debug_message("REGENERATE PING", ping);
-                    send_ping(ping, false);
+                    printMessage("REGENERATE PING", ping, true);
+                    sendPing(ping, false);
                 } else if (abs(m) < abs(msg)) {
                     regenerate(msg);
                 }
 
-                data_mutex.unlock();
-                cond_var.notify_one();
+                dataMutex.unlock();
+                conditionVariable.notify_one();
 
-                if (pong_flag && !ping_flag && (rand() % 100 > 100 - PONG_LOSS_CHANCE)) {
-                    print_debug_message("PONG lost", ping);
+                if (pongPressed) {
+                    printMessage("PONG lost", ping, true);
                 } else {
                     if (inc)
-                        send_pong(pong, false);
+                        sendPong(pong, false);
                     else
-                        send_pong(pong, true);
+                        sendPong(pong, true);
                 }
             }
         }
     }
-
-    pthread_exit(NULL);
 }
 
-void check_opt(int argc, char **argv) {
-    char c;
-
-    while (true) {
-        int option_index = 0;
-
-        c = getopt_long(argc, argv, ":", long_options, &option_index);
-
-        if (c == -1)
-            break;
-    }
-
-    if (ping_flag && pong_flag) {
-        cout << "Use only one option switch: --ping or --pong." << endl;
-        exit(-1);
+void *listenKey(void *arg) {
+    char key;
+    while (!pingPressed || !pongPressed) {
+        cin >> key;
+        if (key == 'p') {
+            printMessage("ping pressed", 0, false);
+            pingPressed = true;
+        } else if (key == 'k') {
+            printMessage("pong pressed", 0, false);
+            pongPressed = true;
+        }
     }
 }
 
-void send_pong(int pong, bool save_state) {
-    usleep(PONG_SEND_DELAY);
-    print_debug_message("PONG sent", pong);
-
-    if (save_state)
-        m = pong;
-
-    MPI_Send(&pong, MSG_SIZE, MPI_INT, receiver, MSG_PONG, MPI_COMM_WORLD);
-}
-
-void send_ping(int ping, bool save_state) {
-    print_debug_message("PING sent", ping);
-
-    if (save_state)
-        m = ping;
-
-    MPI_Send(&ping, MSG_SIZE, MPI_INT, receiver, MSG_PING, MPI_COMM_WORLD);
+void printMessage(const char *message, int value, bool printValue) {
+    if (!printValue)
+        cout << "Proc number " << processId << ": " << message << endl;
+    else
+        cout << "Proc number " << processId << ": " << message << " |" << value << "|" << endl;
 }

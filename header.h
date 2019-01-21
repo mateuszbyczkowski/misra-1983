@@ -18,51 +18,50 @@
 #include <getopt.h>
 #include "header.h"
 
-#define MSG_PING 100
-#define MSG_PONG 101
-#define MSG_SIZE 1
-#define CRITICAL_SECTION_SLEEP_TIME 500000
-#define PONG_SEND_DELAY 500000
-#define PING_LOSS_CHANCE 10
-#define PONG_LOSS_CHANCE 10
-
 using namespace std;
 
-static int ping_flag = 0;
-static int pong_flag = 0;
+int MSG_PING = 100; // MPI communication variables
+int MSG_PONG = 101;
+int MSG_SIZE = 1;
 
-static struct option long_options[] = {
-        {"ping", no_argument, &ping_flag, 1},
-        {"pong", no_argument, &pong_flag, 1},
-        {0, 0,                0,          0}
-};
-
-int receiver;
-int ping = 1;
+int ping = 1; // algorithm variables
 int pong = -1;
-int size;
 int m = 0;
-int provided;
-int node_id;
-int rc;
-pthread_t recv_msg_thread;
-mutex cond_var_mut, data_mutex;
-condition_variable cond_var;
-bool critical_section = false;
-unique_lock<mutex> lk(cond_var_mut);
 
-void *recv_msg(void *arg);
+int initThread; // MPI variables
+int size;
+int processId;
+int receiver;
 
-void incarnate(int val);
+int msgReceiver; // thread descriptors
+int keyListener;
 
-void regenerate(int val);
+bool pingPressed = false; // key listeners
+bool pongPressed = false;
 
-void print_debug_message(const char *message, int value = INT_MIN);
+pthread_t receiveMessageThread; // threads
+pthread_t listenerThread;
 
-void send_pong(int pong, bool save_state);
+mutex conditionalVariableMutex; // mutual exclusion variables
+mutex dataMutex;
+condition_variable conditionVariable;
 
-void send_ping(int ping, bool save_state);
+bool criticalSection = false;
 
-void check_opt(int argc, char **argv);
+unique_lock<mutex> uniqueLock(conditionalVariableMutex);
+
+void *receiveMsg(void *arg);
+
+void *listenKey(void *arg);
+
+void incarnate(int value);
+
+void regenerate(int value);
+
+void printMessage(const char *message, int value, bool printValue);
+
+void sendPong(int pong, bool saveState);
+
+void sendPing(int ping, bool saveState);
 
 #endif //PING_PONG_HEADER_H
