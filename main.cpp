@@ -1,5 +1,9 @@
 #include "header.h"
 
+void handlePing(int msg);
+
+void handlePong(int msg);
+
 int main(int argc, char **argv) {
 
     MPI_Init_thread(&argc, &argv, MPI_THREAD_MULTIPLE, &initThread);
@@ -19,6 +23,8 @@ int main(int argc, char **argv) {
         MPI_Finalize();
     }
 
+    receiver = (processId + 1) % size;
+
     MPI_Barrier(MPI_COMM_WORLD);
 
     // first process has token
@@ -28,15 +34,16 @@ int main(int argc, char **argv) {
     }
 
     while (true) {
-        if (criticalSection) {
+        if (isInCriticalSection) {
             printMessage("in critical section", 0, false);
             usleep(1000000); // performing complex computations
             printMessage("out of critical section", 0, false);
             dataMutex.lock(); //lock and release
-            criticalSection = false;
+            isInCriticalSection = false;
 
             if (pingPressed) {
                 printMessage("PING lost", ping, true);
+                pingPressed = false;
             } else {
                 sendPing(ping, true);
             }
@@ -85,73 +92,97 @@ void *receiveMsg(void *arg) {
         MPI_Recv(&msg, MSG_SIZE, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &status);
 
         if (status.MPI_TAG == MSG_PING) {
-            if (msg < abs(m)) {
-                printMessage("Old PING received", msg, true);
-            } else {
-                printMessage("PING received", msg, true);
-
-                dataMutex.lock();
-
-                if (m == msg) { // the same ping means that pong is lost
-                    regenerate(msg);
-                    printMessage("REGENERATE PONG", pong, true);
-                    sendPong(pong, false);
-                } else {
-                    if (m < msg)
-                        regenerate(msg);
-
-                    criticalSection = true;
-                }
-
-                dataMutex.unlock();
-                conditionVariable.notify_one();
-            }
+            handlePing(msg);
         } else if (status.MPI_TAG == MSG_PONG) {
-            if (abs(msg) < abs(m)) {
-                printMessage("OLD PONG has arrived (delete action)", msg, true);
-            } else {
-                printMessage("PONG received", msg, true);
-                bool inc = false;
-
-                dataMutex.lock();
-
-                if (criticalSection) {
-                    incarnate(msg);
-                    inc = true;
-                } else if (m == msg) {
-                    regenerate(msg);
-                    printMessage("REGENERATE PING", ping, true);
-                    sendPing(ping, false);
-                } else if (abs(m) < abs(msg)) {
-                    regenerate(msg);
-                }
-
-                dataMutex.unlock();
-                conditionVariable.notify_one();
-
-                if (pongPressed) {
-                    printMessage("PONG lost", ping, true);
-                } else {
-                    if (inc)
-                        sendPong(pong, false);
-                    else
-                        sendPong(pong, true);
-                }
-            }
+            handlePong(msg);
         }
     }
 }
 
+void handlePing(int msg) {
+    if (msg < abs(m)) {
+        printMessage("Old PING received", msg, true);
+        return;
+    } else {
+        printMessage("PING received", msg, true);
+
+        dataMutex.lock();
+
+        if (m == msg) { // the same ping means that pong is lost
+            regenerate(msg);
+            printMessage("REGENERATE PONG", pong, true);
+            sendPong(pong, false);
+        } else {
+            if (m < msg) {
+                regenerate(msg);
+            }
+
+            isInCriticalSection = true;
+        }
+
+        dataMutex.unlock();
+        conditionVariable.notify_one();
+    }
+}
+
+void handlePong(int msg) {
+    if (abs(msg) < abs(m)) {
+        printMessage("OLD PONG has arrived (delete action)", msg, true);
+        return;
+    }
+
+    printMessage("PONG received", msg, true);
+    bool incarnation = false;
+
+    dataMutex.lock();
+
+    if (isInCriticalSection) {
+        incarnate(msg);
+        incarnation = true;
+    } else if (m == msg) {
+        regenerate(msg);
+        printMessage("REGENERATE PING", ping, true);
+        sendPing(ping, false);
+    } else if (abs(m) < abs(msg)) {
+        regenerate(msg);
+    }
+
+    dataMutex.unlock();
+    conditionVariable.notify_one();
+
+    if (pongPressed) {
+        printMessage("PONG lost", ping, true);
+        pongPressed = false;
+    } else {
+        if (incarnation) {
+            sendPong(pong, false);
+        } else {
+            sendPong(pong, true);
+        }
+    }
+
+}
+
 void *listenKey(void *arg) {
     char key;
-    while (!pingPressed || !pongPressed) {
+    while (true) {
         cin >> key;
         if (key == 'p') {
-            printMessage("ping pressed", 0, false);
-            pingPressed = true;
+            if (pongPressedTimes > 0) {
+                printMessage("you are in PING lost only mode", 0, false);
+            } else {
+                printMessage("ping pressed", 0, false);
+                pingPressedTimes++;
+                pingPressed = true;
+            }
         } else if (key == 'k') {
-            printMessage("pong pressed", 0, false);
-            pongPressed = true;
+            if (pingPressedTimes > 0) {
+                printMessage("you are in PONG lost only mode", 0, false);
+            } else {
+                printMessage("pong pressed", 0, false);
+                pongPressed = true;
+                pongPressedTimes++;
+            }
         }
     }
 }

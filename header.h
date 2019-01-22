@@ -36,8 +36,11 @@ int receiver;
 int msgReceiver; // thread descriptors
 int keyListener;
 
-bool pingPressed = false; // key listeners
-bool pongPressed = false;
+int pingPressed = false;
+int pongPressed = false;
+
+int pingPressedTimes = 0; // key listeners
+int pongPressedTimes = 0;
 
 pthread_t receiveMessageThread; // threads
 pthread_t listenerThread;
@@ -46,7 +49,7 @@ mutex conditionalVariableMutex; // mutual exclusion variables
 mutex dataMutex;
 condition_variable conditionVariable;
 
-bool criticalSection = false;
+bool isInCriticalSection = false;
 
 unique_lock<mutex> uniqueLock(conditionalVariableMutex);
 
