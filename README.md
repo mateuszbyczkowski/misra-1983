@@ -1,16 +1,13 @@
-ping-pong
+ping-pong algorithm
 =========
+Ping-Pong algorithm (Misra 1983).
 
-Mutual exclusion within ring topology - Ping-Pong algorithm (Misra 1983).
 
-
-How to compile and run:
+Compile and run:
 -----------------------
 ```bash
 mpic++ main.cpp -std=c++11 -pthread
-mpirun -n [proc_num] ./a.out [--ping] [--pong]
+mpirun -n [proc_num] ./a.out
 ```
 
-
-`--ping` and `--pong` turn on message lost simulation
-
+Message lost simulation turns on press 'p' for ping and 'k' for pong.
