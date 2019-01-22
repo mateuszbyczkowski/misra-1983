@@ -13,13 +13,13 @@ int main(int argc, char **argv) {
 
     msgReceiver = pthread_create(&receiveMessageThread, NULL, receiveMsg, NULL);
     if (msgReceiver) {
-        printMessage("unable to create thread", 0, false);
+        printMessage("can't create thread", 0, false);
         MPI_Finalize();
     }
 
     keyListener = pthread_create(&listenerThread, NULL, listenKey, NULL);
     if (keyListener) {
-        printMessage("unable to create thread", 0, false);
+        printMessage("can't create thread", 0, false);
         MPI_Finalize();
     }
 
@@ -35,14 +35,14 @@ int main(int argc, char **argv) {
 
     while (true) {
         if (isInCriticalSection) {
-            printMessage("in critical section", 0, false);
+            printMessage("-> in critical section", 0, false);
             usleep(1000000); // performing complex computations
-            printMessage("out of critical section", 0, false);
+            printMessage("<- out of critical section", 0, false);
             dataMutex.lock(); //lock and release
             isInCriticalSection = false;
 
             if (pingPressed) {
-                printMessage("PING lost", ping, true);
+                printMessage("PING LOST", ping, true);
                 pingPressed = false;
             } else {
                 sendPing(ping, true);
@@ -69,8 +69,9 @@ void sendPong(int pong, bool saveState) {
     usleep(500000);
     printMessage("PONG sent", pong, true);
 
-    if (saveState)
+    if (saveState) {
         m = pong;
+    }
 
     MPI_Send(&pong, MSG_SIZE, MPI_INT, receiver, MSG_PONG, MPI_COMM_WORLD);
 }
@@ -78,8 +79,9 @@ void sendPong(int pong, bool saveState) {
 void sendPing(int ping, bool saveState) {
     printMessage("PING sent", ping, true);
 
-    if (saveState)
+    if (saveState) {
         m = ping;
+    }
 
     MPI_Send(&ping, MSG_SIZE, MPI_INT, receiver, MSG_PING, MPI_COMM_WORLD);
 }
@@ -138,6 +140,7 @@ void handlePong(int msg) {
 
     if (isInCriticalSection) {
         incarnate(msg);
+        printMessage("INCARNATION", 0, false);
         incarnation = true;
     } else if (m == msg) {
         regenerate(msg);
@@ -151,7 +154,7 @@ void handlePong(int msg) {
     conditionVariable.notify_one();
 
     if (pongPressed) {
-        printMessage("PONG lost", ping, true);
+        printMessage("PONG LOST", ping, true);
         pongPressed = false;
     } else {
         if (incarnation) {
@@ -169,7 +172,7 @@ void *listenKey(void *arg) {
         cin >> key;
         if (key == 'p') {
             if (pongPressedTimes > 0) {
-                printMessage("you are in PING lost only mode", 0, false);
+                printMessage("you are in PONG lost only mode", 0, false);
             } else {
                 printMessage("ping pressed", 0, false);
                 pingPressedTimes++;
@@ -177,7 +180,7 @@ void *listenKey(void *arg) {
             }
         } else if (key == 'k') {
             if (pingPressedTimes > 0) {
-                printMessage("you are in PONG lost only mode", 0, false);
+                printMessage("you are in PING lost only mode", 0, false);
             } else {
                 printMessage("pong pressed", 0, false);
                 pongPressed = true;
@@ -188,8 +191,9 @@ void *listenKey(void *arg) {
 }
 
 void printMessage(const char *message, int value, bool printValue) {
-    if (!printValue)
+    if (!printValue) {
         cout << "Proc number " << processId << ": " << message << endl;
-    else
+    } else {
         cout << "Proc number " << processId << ": " << message << " |" << value << "|" << endl;
+    }
 }
